@@ -1,11 +1,14 @@
 import java.io.IOException;
+
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
@@ -18,7 +21,7 @@ import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 public class Kmeans {
 
 	public static class KmeansMapper extends Mapper<Object, Text, Point, Point> {
-		private final List<Point> initialCentroids = new ArrayList<Point>();
+		private final List<Point> Centroids = new ArrayList<Point>();
 		double min = Double.MAX_VALUE;
 
 		@Override
@@ -28,6 +31,20 @@ public class Kmeans {
 			// on va lire à chaque fois les centroids mais la premier on vas
 			// prendre un par defaut selon
 			// le k
+			Configuration conf = context.getConfiguration();
+			Path CentroidsPath = new Path(conf.get("Centroid"));
+			FileSystem fs = FileSystem.get(conf);
+			try(SequenceFile.Reader reader = new SequenceFile.Reader(fs, CentroidsPath,conf )){
+				Point key = new Point();
+				IntWritable value = new IntWritable();
+				
+				while(reader.next(key,value)){
+				Centroids.add(key);
+				}
+				
+				
+				
+			}
 
 			super.setup(context);
 		}
@@ -39,13 +56,13 @@ public class Kmeans {
 																// grouping
 			// add initial centroids
 			for (int i = 0; i < k; i++)
-				initialCentroids.add(new Point(Double.valueOf(splits[0]), Double.valueOf(splits[1])));
+				Centroids.add(new Point(Double.valueOf(splits[0]), Double.valueOf(splits[1])));
 			// calculate distance with other points
 			double distance;
 			Point nearest = null;
 			for (int i = 0; i < k; i++) {
-				distance = Math.sqrt(Math.pow((Double.valueOf(splits[0]) - initialCentroids.get(i).point.getX()), 2)
-						+ (Math.pow(Double.valueOf(splits[1]) - initialCentroids.get(i).point.getY(), 2)));
+				distance = Math.sqrt(Math.pow((Double.valueOf(splits[0]) - Centroids.get(i).point.getX()), 2)
+						+ (Math.pow(Double.valueOf(splits[1]) - Centroids.get(i).point.getY(), 2)));
 				if (distance < min) {
 					min = distance;
 					nearest = new Point(Double.valueOf(splits[0]), Double.valueOf(splits[1]));
@@ -76,9 +93,12 @@ public class Kmeans {
 			}
 			// on ajoute les nouveaux centroids
 			//diviser sur les centroids
-			 Centroids.add(newCentroid);
+			 
+			newCentroid=new Point(newCentroid.getPoint().getX()/ListPoint.size(), newCentroid.getPoint().getY()/ListPoint.size());
+			Centroids.add(newCentroid);
+			 
 			for (Point point : ListPoint) {
-				// context.write(arg0, point);
+				context.write(newCentroid, point);
 			}
 			// context.write(key, result);
 		}
@@ -89,6 +109,15 @@ public class Kmeans {
 			// TODO Auto-generated method stub
 			// on va stocker les centroids dans le fichier relai qui va étre lu
 			// dans la partie setup
+			Configuration conf = context.getConfiguration();
+			Path outPath = new Path(conf.get("Centroid"));
+			FileSystem fs = FileSystem.get(conf);
+			fs.delete(outPath,true);
+			try (SequenceFile.Writer writer = SequenceFile.createWriter(fs,context.getConfiguration(),outPath,Point.class,IntWritable.class)){
+				for(Point point: Centroids){
+					writer.append(point, new IntWritable(0));
+				}
+			}
 
 			super.cleanup(context);
 		}
