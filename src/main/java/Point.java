@@ -29,13 +29,15 @@ public class Point implements WritableComparable<Point> {
 
 	public void readFields(DataInput in) throws IOException {
 		// TODO Auto-generated method stub
-		int length = in.readInt();
+		point.x=in.readDouble();
+		point.y= in.readDouble();
 		
 	}
 
 	public void write(DataOutput out) throws IOException {
 		// TODO Auto-generated method stub
-		
+		out.writeDouble(point.x);
+		out.writeDouble(point.y);
 	}
 
 	
@@ -43,5 +45,8 @@ public class Point implements WritableComparable<Point> {
 	public int compareTo(Point o) {
 		// TODO Auto-generated method stub
 		return 0;
+	}
+	public String toString(){
+		return "x :"+this.point.getX()+",y="+this.point.getY()+"\n";
 	}
 }

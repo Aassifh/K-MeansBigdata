@@ -1,15 +1,20 @@
 import java.io.IOException;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.io.DoubleWritable;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.SequenceFile;
 import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapred.SequenceFileInputFormat;
+import org.apache.hadoop.mapred.SequenceFileOutputFormat;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
@@ -20,105 +25,83 @@ import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 
 public class Kmeans {
 
-	public static class KmeansMapper extends Mapper<Object, Text, Point, Point> {
-		private final List<Point> Centroids = new ArrayList<Point>();
+	public static class KmeansMapper extends Mapper<Object, Text, IntWritable, DoubleWritable> {
+		private final List<Double> Centroids = new ArrayList<Double>();
 		double min = Double.MAX_VALUE;
 
 		@Override
-		protected void setup(Mapper<Object, Text, Point, Point>.Context context)
+		protected void setup(Mapper<Object, Text, IntWritable, DoubleWritable>.Context context)
 				throws IOException, InterruptedException {
-			// creer un fichier dont on va stocker les centroid
-			// on va lire à chaque fois les centroids mais la premier on vas
-			// prendre un par defaut selon
-			// le k
-			Configuration conf = context.getConfiguration();
-			Path CentroidsPath = new Path(conf.get("Centroid"));
-			FileSystem fs = FileSystem.get(conf);
-			try(SequenceFile.Reader reader = new SequenceFile.Reader(fs, CentroidsPath,conf )){
-				Point key = new Point();
-				IntWritable value = new IntWritable();
+			
+				Centroids.add(-900000000.0);
+				Centroids.add(-900000000.0);
+				Centroids.add(-891154290.0);
 				
-				while(reader.next(key,value)){
-				Centroids.add(key);
-				}
-				
-				
-				
-			}
-
 			super.setup(context);
 		}
 
 		public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
 			String[] splits = value.toString().split(",");
-
-			int k = context.getConfiguration().getInt("k", 1);// define the
-																// grouping
-			// add initial centroids
-			for (int i = 0; i < k; i++)
-				Centroids.add(new Point(Double.valueOf(splits[0]), Double.valueOf(splits[1])));
-			// calculate distance with other points
-			double distance;
-			Point nearest = null;
+			int k = context.getConfiguration().getInt("cluster",3);//checl later wont get the data sent from the job 
+			HashMap<Integer, Double> clustering = new HashMap<Integer, Double>();
+			double distance = 0;
+			int colonne = context.getConfiguration().getInt("colonne", 0);
+			double plus_proche=0;
+			System.out.print("k-->" + k);
+			System.out.println("colonne-->" + colonne);
+			
 			for (int i = 0; i < k; i++) {
-				distance = Math.sqrt(Math.pow((Double.valueOf(splits[0]) - Centroids.get(i).point.getX()), 2)
-						+ (Math.pow(Double.valueOf(splits[1]) - Centroids.get(i).point.getY(), 2)));
-				if (distance < min) {
+				distance+= Double.parseDouble(splits[colonne]) - Centroids.get(i);
+				System.out.println("dis --> "+distance);
+			if (distance < min) {
+					System.out.println("min-->" + colonne);
 					min = distance;
-					nearest = new Point(Double.valueOf(splits[0]), Double.valueOf(splits[1]));
-
-				}
-
+					if (clustering.containsValue(Double.parseDouble(splits[colonne]))) {
+						clustering.values().remove(Double.parseDouble(splits[colonne]));
+						clustering.put(i, Double.parseDouble(splits[colonne]));
+					}
+					
+				} 
+				
 			}
 
-			context.write(nearest, new Point(Double.valueOf(splits[0]), Double.valueOf(splits[1])));
+			Iterator it = clustering.entrySet().iterator();
+			while (it.hasNext()) {
+				Map.Entry pair = (Map.Entry) it.next();
+				context.write(new IntWritable((int) pair.getKey()), new DoubleWritable((double) pair.getValue()));
+			}
+
 		}
 	}
 
-	public static class KmeansReducer extends Reducer<Point, Point, Point, Point> {
-		private final List<Point> Centroids = new ArrayList<Point>();
+	public static class KmeansReducer extends Reducer<IntWritable, DoubleWritable, IntWritable, DoubleWritable> {
+		// private final List<Point> Centroids = new ArrayList<Point>();
 
-		public void reduce(Point key, Iterable<Point> values, Context context)
+		public void reduce(IntWritable key, Iterable<DoubleWritable> values, Context context)
 				throws IOException, InterruptedException {
 
-			Point newCentroid = null;
-			List<Point> ListPoint = new ArrayList<Point>();
-			// define a center
-			for (Point value : values) {
-				ListPoint.add(value);
-				if (newCentroid==null) 			
-					newCentroid=value;
-				else 
-					newCentroid=new Point(newCentroid.getPoint().getX()+value.getPoint().getX(),newCentroid.getPoint().getY()+value.getPoint().getY());
+			for (DoubleWritable doubleWritable : values) {
+				context.write(key, doubleWritable);
 			}
-			// on ajoute les nouveaux centroids
-			//diviser sur les centroids
-			 
-			newCentroid=new Point(newCentroid.getPoint().getX()/ListPoint.size(), newCentroid.getPoint().getY()/ListPoint.size());
-			Centroids.add(newCentroid);
-			 
-			for (Point point : ListPoint) {
-				context.write(newCentroid, point);
-			}
-			// context.write(key, result);
+
 		}
 
 		@Override
-		protected void cleanup(Reducer<Point, Point, Point, Point>.Context context)
+		protected void cleanup(Reducer<IntWritable, DoubleWritable, IntWritable, DoubleWritable>.Context context)
 				throws IOException, InterruptedException {
-			// TODO Auto-generated method stub
-			// on va stocker les centroids dans le fichier relai qui va étre lu
-			// dans la partie setup
-			Configuration conf = context.getConfiguration();
-			Path outPath = new Path(conf.get("Centroid"));
-			FileSystem fs = FileSystem.get(conf);
-			fs.delete(outPath,true);
-			try (SequenceFile.Writer writer = SequenceFile.createWriter(fs,context.getConfiguration(),outPath,Point.class,IntWritable.class)){
-				for(Point point: Centroids){
-					writer.append(point, new IntWritable(0));
-				}
-			}
-
+			// Configuration conf = context.getConfiguration();
+			// Path outPath = new Path(conf.get("output"));
+			// FileSystem fs = FileSystem.get(conf);
+			// fs.delete(outPath, true);
+			// try (SequenceFile.Writer writer = SequenceFile.createWriter(fs,
+			// context.getConfiguration(), outPath,
+			// IntWritable.class, DoubleWritable.class)) {
+			// for (Point point : Centroids) {
+			// .append(point, new IntWritable(0));
+			// }
+			// }
+			// // TODO Auto-generated method stub
+			//
 			super.cleanup(context);
 		}
 
@@ -127,19 +110,23 @@ public class Kmeans {
 	public static void main(String[] args) throws Exception {
 		Configuration conf = new Configuration();
 		Job job = Job.getInstance(conf, "Kmeans");
-		conf.set("k", args[1]);
+		conf.setInt("cluster",Integer.valueOf(args[1]));
+		conf.set("colonne", args[2]);
+		
+		job.setInputFormatClass(TextInputFormat.class);
+		job.setOutputFormatClass(TextOutputFormat.class);
+
 		job.setNumReduceTasks(1);
 		job.setJarByClass(Kmeans.class);
 		job.setMapperClass(KmeansMapper.class);
-		job.setMapOutputKeyClass(Text.class);
-		job.setMapOutputValueClass(Point.class);
+		job.setMapOutputKeyClass(IntWritable.class);
+		job.setMapOutputValueClass(DoubleWritable.class);
 		job.setReducerClass(KmeansReducer.class);
-		job.setOutputKeyClass(Text.class);
-		job.setOutputValueClass(IntWritable.class);
-		job.setOutputFormatClass(TextOutputFormat.class);
-		job.setInputFormatClass(TextInputFormat.class);
+		job.setOutputKeyClass(IntWritable.class);
+		job.setOutputValueClass(DoubleWritable.class);
 		FileInputFormat.addInputPath(job, new Path(args[0]));
-		// FileOutputFormat.setOutputPath(job, new Path(args[1]));
+		FileOutputFormat.setOutputPath(job, new Path("nomdichier._means_k19"));
+
 		System.exit(job.waitForCompletion(true) ? 0 : 1);
 	}
 }

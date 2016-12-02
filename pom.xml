@@ -29,7 +29,7 @@
   			<configuration>
   				<archive>
   					<manifest>
-  						<mainClass>bigdata.TP3</mainClass>
+  						<mainClass>Kmeans</mainClass>
   					</manifest>
   				</archive>
   			</configuration>
