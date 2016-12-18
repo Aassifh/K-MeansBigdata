@@ -29,7 +29,7 @@
   			<configuration>
   				<archive>
   					<manifest>
-  						<mainClass>Kmeans</mainClass>
+  						<mainClass>KmeansNew</mainClass>
   					</manifest>
   				</archive>
   			</configuration>
