@@ -21,7 +21,7 @@ import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 
 public class KmeansNew {
-	public static class KMeansNewMapper extends Mapper<Object, Text, DoubleWritable, DoubleWritable> {
+	public static class KMeansNewMapper extends Mapper<Object, Text, DoubleWritable, PointWritable> {
 		private List<Double> Centroids = new ArrayList<Double>();
 
 		int k = 0;
@@ -53,8 +53,10 @@ public class KmeansNew {
 
 			// System.out.println("K inside mapper>>" + k);
 			// System.out.println("nbColonnes inside mapper >> " + nbColonnes);
+			int indice = 0;
 			double distance;
 			double min = Double.MAX_VALUE;
+			//Double points [] = new Double[nbColonnes];
 			DoubleWritable nearest = null;
 			for (int i = 0; i < k; i++) {
 				// System.out.println("measuring distance with
@@ -66,16 +68,16 @@ public class KmeansNew {
 				if (distance < min) {
 					min = distance;
 					nearest = new DoubleWritable(context.getConfiguration().getDouble("Center" + i, 0.0));
-
+					indice=i ;
 				}
 				// à voir
 
 			}
 
-			context.write(nearest, new DoubleWritable(Double.valueOf(splits[nbColonnes])));
+			context.write(nearest, new PointWritable(indice,Double.valueOf(splits[nbColonnes])));
 		}
 
-		public void cleanup(Mapper<Object, Text, DoubleWritable, DoubleWritable>.Context context)
+		public void cleanup(Mapper<Object, Text, DoubleWritable, PointWritable>.Context context)
 				throws IOException, InterruptedException {
 
 			super.cleanup(context);
@@ -83,13 +85,13 @@ public class KmeansNew {
 		}
 	}
 
-	public static class KMeansNewReducer extends Reducer<DoubleWritable, DoubleWritable, IntWritable, DoubleWritable> {
-		protected void setup(Reducer<DoubleWritable, DoubleWritable, IntWritable, DoubleWritable>.Context context)
+	public static class KMeansNewReducer extends Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable> {
+		protected void setup(Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable>.Context context)
 				throws IOException, InterruptedException {
 
 		}
 
-		public void reduce(IntWritable key, Iterable<DoubleWritable> values, Context context)
+		public void reduce(IntWritable key, Iterable<PointWritable> values, Context context)
 				throws IOException, InterruptedException {
 			// here we will receive a list of point which their key is the
 			// nearest center
@@ -97,20 +99,21 @@ public class KmeansNew {
 			// now we have to calculate the centroids
 			double sum = 0.0;
 			int nbelem = 0;
-			for (DoubleWritable value : values) {
-				sum += value.get();
+			for (PointWritable value : values) {
+				sum += value.Point;
 				nbelem++;
 				context.write(key, value);
 			}
 
-			//context.getConfiguration().setDouble("newCenter" + key, sum / nbelem);
-			context.getCounter("newCenters", String.valueOf(key.get())).setValue(Double.doubleToLongBits(sum / nbelem));
-			
-			System.out.println("newCenter is set with the value >>"+ sum/nbelem);
+			 context.getConfiguration().setDouble("newCenter" + key, sum / nbelem);
+
+			context.getCounter("newCenters", key.toString()).setValue(Double.doubleToLongBits(sum / nbelem));
+
+			System.out.println("newCenter is set with the value >>" + sum / nbelem);
 
 		}
 
-		public void cleanup(Reducer<DoubleWritable, DoubleWritable, IntWritable, DoubleWritable>.Context context)
+		public void cleanup(Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable>.Context context)
 				throws IOException, InterruptedException {
 
 		}
@@ -118,9 +121,10 @@ public class KmeansNew {
 
 	public static List<Double> setCentroids(int NbCluster, String Input, Configuration conf, int dimension)
 			throws IOException {
+		// more to come : dimension management !!!
 		System.out.println("setCentroids is called");
 		List<Double> Centroids = new ArrayList<Double>();
-		// CentroidsPath = new Path(conf.get("Centroid"));
+
 		FileSystem fs = FileSystem.get(conf);
 		try {
 			BufferedReader br = new BufferedReader(new InputStreamReader(fs.open(new Path(Input))));
@@ -181,10 +185,10 @@ public class KmeansNew {
 			job.setJarByClass(KmeansNew.class);
 			job.setMapperClass(KMeansNewMapper.class);
 			job.setMapOutputKeyClass(DoubleWritable.class);
-			job.setMapOutputValueClass(DoubleWritable.class);
+			job.setMapOutputValueClass(PointWritable.class);
 			job.setReducerClass(KMeansNewReducer.class);
 			job.setOutputKeyClass(IntWritable.class);
-			job.setOutputValueClass(DoubleWritable.class);
+			job.setOutputValueClass(Text.class);
 			job.setInputFormatClass(TextInputFormat.class);
 			job.setOutputFormatClass(TextOutputFormat.class);
 			FileInputFormat.addInputPath(job, new Path(args[0]));
@@ -193,17 +197,19 @@ public class KmeansNew {
 			job.waitForCompletion(true);
 
 			for (int i = 0; i < Centroids.size(); i++) {
-				// here the fucking bug the getCounter doesnt work !!
-				System.out.println(" using counters "
-						+ Double.longBitsToDouble(job.getCounters().findCounter("newCenters", String.valueOf(Centroids.get(i))).getValue()));
-				
-				
-				newCenters.add(Double.longBitsToDouble( job.getCounters().findCounter("newCenters", String.valueOf(Centroids.get(i))).getValue()));
-				// put new centers in onld centroids list 
-			}
-			System.out.println("what the hell is happening  to the number of clusters>>"+ conf.getInt("NbCluster", 1));
+			// here the fucking bug the getCounter doesnt work !!
+			
+			//  essayer de récupérer !! le nouveaux centres !!
+			System.out.println(" using counters "
+					+ Double.longBitsToDouble(job.getCounters().findCounter("newCenters", String.valueOf(Centroids.get(i))).getValue()));
+
+			newCenters
+					.add(Double.longBitsToDouble(job.getCounters().findCounter("newCenters",String.valueOf(Centroids.get(i))).getValue()));
+			// put new centers in onld centroids list
+			 }
+			System.out.println("what the hell is happening  to the number of clusters>>" + conf.getInt("NbCluster", 1));
 			converged = iterationChecking(Centroids, newCenters, conf.getInt("NbCluster", 1));
-			Centroids = converged ? newCenters : Centroids; 
+			Centroids = converged ? Centroids : newCenters;
 			nbiteration++;
 		}
 
