@@ -9,8 +9,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.DoubleWritable;
 import org.apache.hadoop.io.IntWritable;
-import org.apache.hadoop.io.NullWritable;
-import org.apache.hadoop.io.SequenceFile;
+
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
@@ -21,8 +20,9 @@ import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 
 public class KmeansNew {
+
 	public static class KMeansNewMapper extends Mapper<Object, Text, DoubleWritable, PointWritable> {
-		private List<Double> Centroids = new ArrayList<Double>();
+		//private List<Double> Centroids = new ArrayList<Double>();
 
 		int k = 0;
 		int nbColonnes = 0;
@@ -73,7 +73,7 @@ public class KmeansNew {
 				// à voir
 
 			}
-
+			// indice ==> id of the cluster of which the points belongs to
 			context.write(nearest, new PointWritable(indice,Double.valueOf(splits[nbColonnes])));
 		}
 
@@ -86,9 +86,12 @@ public class KmeansNew {
 	}
 
 	public static class KMeansNewReducer extends Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable> {
+		double sum = 0.0;
+		int nbelem = 0;
+		int k =0;
 		protected void setup(Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable>.Context context)
 				throws IOException, InterruptedException {
-
+			k = context.getConfiguration().getInt("NbCluster", 10);
 		}
 
 		public void reduce(IntWritable key, Iterable<PointWritable> values, Context context)
@@ -97,24 +100,24 @@ public class KmeansNew {
 			// nearest center
 			// by that point we can identify to which cluster it belongs
 			// now we have to calculate the centroids
-			double sum = 0.0;
-			int nbelem = 0;
+			
 			for (PointWritable value : values) {
 				sum += value.Point;
 				nbelem++;
 				context.write(key, value);
 			}
 
-			 context.getConfiguration().setDouble("newCenter" + key, sum / nbelem);
-
-			context.getCounter("newCenters", key.toString()).setValue(Double.doubleToLongBits(sum / nbelem));
-
+			context.getConfiguration().setDouble("newCenters"+key, sum/nbelem);
+			for(int i=0;i<k ;i++)
+			context.getCounter("newCenters",""+i+"").setValue((long) (sum/nbelem));
 			System.out.println("newCenter is set with the value >>" + sum / nbelem);
 
 		}
 
 		public void cleanup(Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable>.Context context)
 				throws IOException, InterruptedException {
+			
+		
 
 		}
 	}
@@ -124,7 +127,7 @@ public class KmeansNew {
 		// more to come : dimension management !!!
 		System.out.println("setCentroids is called");
 		List<Double> Centroids = new ArrayList<Double>();
-
+		
 		FileSystem fs = FileSystem.get(conf);
 		try {
 			BufferedReader br = new BufferedReader(new InputStreamReader(fs.open(new Path(Input))));
@@ -135,11 +138,13 @@ public class KmeansNew {
 			while (line != null) {
 				System.out.println("inside boucle" + line);
 				String[] splits = line.split(",");
-				Centroids.add(Double.parseDouble(splits[0]));
+				if(!Centroids.contains(Double.parseDouble(splits[0])))
+					Centroids.add(Double.parseDouble(splits[0]));
+				else line = br.readLine();
 				System.out.println("we added -->" + splits[0]);
 				if (Centroids.size() == NbCluster)
 					break;
-				line = br.readLine();
+				
 			}
 		} catch (Exception e) {
 
@@ -179,9 +184,23 @@ public class KmeansNew {
 		List<Double> newCenters = new ArrayList<Double>();
 		while (!converged) {
 			String output = args[1] + "_" + nbiteration + "_" + System.nanoTime();
+			for( int i =0; i<Centroids.size();i++)
+				newCenters.add(conf.getDouble("newCenters"+Centroids.get(i), -1));
+		
+//			for (int i = 0; i < Centroids.size(); i++) {
+//			// here the fucking bug the getCounter doesnt work !!
+//			
+//			//  essayer de récupérer !! le nouveaux centres !!
+//			System.out.println(" using counters "
+//					+ Double.longBitsToDouble(job.getCounters().findCounter("newCenters", String.valueOf(Centroids.get(i))).getValue()));
+//
+//			newCenters
+//					.add(Double.longBitsToDouble(job.getCounters().findCounter("newCenters",String.valueOf(Centroids.get(i))).getValue()));
+//			// put new centers in onld centroids list
+//			 }
 
 			job = Job.getInstance(conf, "Kmeans_iteration" + nbiteration);
-			job.setNumReduceTasks(1);
+			job.setNumReduceTasks(1);		
 			job.setJarByClass(KmeansNew.class);
 			job.setMapperClass(KMeansNewMapper.class);
 			job.setMapOutputKeyClass(DoubleWritable.class);
@@ -195,18 +214,8 @@ public class KmeansNew {
 
 			FileOutputFormat.setOutputPath(job, new Path(output));
 			job.waitForCompletion(true);
-
-			for (int i = 0; i < Centroids.size(); i++) {
-			// here the fucking bug the getCounter doesnt work !!
-			
-			//  essayer de récupérer !! le nouveaux centres !!
-			System.out.println(" using counters "
-					+ Double.longBitsToDouble(job.getCounters().findCounter("newCenters", String.valueOf(Centroids.get(i))).getValue()));
-
-			newCenters
-					.add(Double.longBitsToDouble(job.getCounters().findCounter("newCenters",String.valueOf(Centroids.get(i))).getValue()));
-			// put new centers in onld centroids list
-			 }
+			for(int i =0; i<conf.getInt("NbCluster", 1); i++)
+			System.out.println(" here is th counter "+job.getCounters().findCounter("newCenters",""+i+"").getValue());
 			System.out.println("what the hell is happening  to the number of clusters>>" + conf.getInt("NbCluster", 1));
 			converged = iterationChecking(Centroids, newCenters, conf.getInt("NbCluster", 1));
 			Centroids = converged ? Centroids : newCenters;
