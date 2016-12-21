@@ -22,7 +22,7 @@ public class PointWritable implements Writable {
 	}
 	
 	public PointWritable(int nbcluster, Double point) {
-		super();
+		
 		this.nbcluster = nbcluster;
 		Point = point;
 	}

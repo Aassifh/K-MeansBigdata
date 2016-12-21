@@ -27,7 +27,7 @@ public class KmeansNew {
 		int k = 0;
 		int nbColonnes = 0;
 		Path CentroidsPath = null;
-
+		
 		protected void setup(Context context) throws IOException, InterruptedException {
 			// creer un fichier dont on va stocker les centroid
 			// // on va lire à chaque fois les centroids mais la premier on vas
@@ -57,7 +57,7 @@ public class KmeansNew {
 			double distance;
 			double min = Double.MAX_VALUE;
 			//Double points [] = new Double[nbColonnes];
-			DoubleWritable nearest = null;
+			double nearest = 0.0;
 			for (int i = 0; i < k; i++) {
 				// System.out.println("measuring distance with
 				// >>"+context.getConfiguration().getDouble("Center"+i, 0.0));
@@ -67,14 +67,14 @@ public class KmeansNew {
 				// System.out.println("the distance >>"+distance);
 				if (distance < min) {
 					min = distance;
-					nearest = new DoubleWritable(context.getConfiguration().getDouble("Center" + i, 0.0));
-					indice=i ;
+					nearest = context.getConfiguration().getDouble("Center" + i, 0.0);
+					indice=i;
 				}
 				// à voir
 
 			}
 			// indice ==> id of the cluster of which the points belongs to
-			context.write(nearest, new PointWritable(indice,Double.valueOf(splits[nbColonnes])));
+			context.write(new DoubleWritable(nearest), new PointWritable(indice,Double.valueOf(splits[nbColonnes])));
 		}
 
 		public void cleanup(Mapper<Object, Text, DoubleWritable, PointWritable>.Context context)
@@ -84,7 +84,28 @@ public class KmeansNew {
 
 		}
 	}
+	public static class KmeansNewCombiner extends Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable> {
+		double sum = 0.0;
+		int nbelem = 0;
+		int k =0;
+		public void reduce(DoubleWritable key, Iterable<PointWritable> values,Context context) throws IOException, InterruptedException {
+			
+			// here we will receive a list of point which their key is the
+						// nearest center
+						// by that point we can identify to which cluster it belongs
+						// now we have to calculate the centroids
+						
+						for (PointWritable value : values) {
+							sum += value.Point;
+							nbelem++;
+							context.write(new IntWritable(value.nbcluster), value);
+						}
 
+						
+		}
+	}
+
+	
 	public static class KMeansNewReducer extends Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable> {
 		double sum = 0.0;
 		int nbelem = 0;
@@ -94,24 +115,15 @@ public class KmeansNew {
 			k = context.getConfiguration().getInt("NbCluster", 10);
 		}
 
-		public void reduce(IntWritable key, Iterable<PointWritable> values, Context context)
+		public void reduce(DoubleWritable key, Iterable<PointWritable> values, Context context)
 				throws IOException, InterruptedException {
-			// here we will receive a list of point which their key is the
-			// nearest center
-			// by that point we can identify to which cluster it belongs
-			// now we have to calculate the centroids
-			
-			for (PointWritable value : values) {
-				sum += value.Point;
-				nbelem++;
-				context.write(key, value);
+			for (PointWritable pointWritable : values) {
+				context.write(new IntWritable((int)key.get()), pointWritable);
 			}
-
 			context.getConfiguration().setDouble("newCenters"+key, sum/nbelem);
 			for(int i=0;i<k ;i++)
 			context.getCounter("newCenters",""+i+"").setValue((long) (sum/nbelem));
 			System.out.println("newCenter is set with the value >>" + sum / nbelem);
-
 		}
 
 		public void cleanup(Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable>.Context context)
@@ -205,9 +217,10 @@ public class KmeansNew {
 			job.setMapperClass(KMeansNewMapper.class);
 			job.setMapOutputKeyClass(DoubleWritable.class);
 			job.setMapOutputValueClass(PointWritable.class);
+			job.setCombinerClass(KmeansNewCombiner.class);
 			job.setReducerClass(KMeansNewReducer.class);
 			job.setOutputKeyClass(IntWritable.class);
-			job.setOutputValueClass(Text.class);
+			job.setOutputValueClass(PointWritable.class);
 			job.setInputFormatClass(TextInputFormat.class);
 			job.setOutputFormatClass(TextOutputFormat.class);
 			FileInputFormat.addInputPath(job, new Path(args[0]));
@@ -228,10 +241,11 @@ public class KmeansNew {
 		job.setJarByClass(KmeansNew.class);
 		job.setMapperClass(KMeansNewMapper.class);
 		job.setMapOutputKeyClass(DoubleWritable.class);
-		job.setMapOutputValueClass(DoubleWritable.class);
+		job.setMapOutputValueClass(PointWritable.class);
+		job.setCombinerClass(KmeansNewCombiner.class);
 		job.setReducerClass(KMeansNewReducer.class);
 		job.setOutputKeyClass(IntWritable.class);
-		job.setOutputValueClass(DoubleWritable.class);
+		job.setOutputValueClass(PointWritable.class);
 		job.setInputFormatClass(TextInputFormat.class);
 		job.setOutputFormatClass(TextOutputFormat.class);
 		FileInputFormat.addInputPath(job, new Path(args[0]));
