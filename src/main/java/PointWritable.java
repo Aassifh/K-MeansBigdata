@@ -46,7 +46,7 @@ public class PointWritable implements Writable {
 
 	@Override
 	public String toString() {
-		return Point+","+nbcluster;
+		return nbcluster+">>>"+ Point;
 	}
 
 	
