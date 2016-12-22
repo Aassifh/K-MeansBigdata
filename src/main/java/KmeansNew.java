@@ -8,7 +8,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.DoubleWritable;
-import org.apache.hadoop.io.IntWritable;
+
 
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
@@ -59,13 +59,13 @@ public class KmeansNew {
 			//Double points [] = new Double[nbColonnes];
 			double nearest = 0.0;
 			for (int i = 0; i < k; i++) {
-				// System.out.println("measuring distance with
-				// >>"+context.getConfiguration().getDouble("Center"+i, 0.0));
-				// System.out.println("with"+
-				// Double.valueOf(splits[nbColonnes]));
+			 System.out.println("measuring distance with >>"+context.getConfiguration().getDouble("Center"+i, 0.0));
+				 System.out.println("with"+
+				 Double.valueOf(splits[nbColonnes]));
+				 // should compute the nearest center of a center !!
 				distance = Double.valueOf(splits[nbColonnes]) - context.getConfiguration().getDouble("Center" + i, 0.0);
-				// System.out.println("the distance >>"+distance);
-				if (distance < min) {
+//				 System.out.println("the distance >>"+distance);
+				if (distance < min  && distance <0.0)  {
 					min = distance;
 					nearest = context.getConfiguration().getDouble("Center" + i, 0.0);
 					indice=i;
@@ -89,7 +89,7 @@ public class KmeansNew {
 		public void reduce(DoubleWritable key, Iterable<PointWritable> values,Context context) throws IOException, InterruptedException {
 			double sum = 0.0;
 			int nbelem = 0;
-			int k =0;
+			//int k =0;
 			// here we will receive a list of point which their key is the
 						// nearest center
 						// by that point we can identify to which cluster it belongs
@@ -100,17 +100,18 @@ public class KmeansNew {
 							nbelem++;
 							
 						}
-
+						System.out.println("sum >>"+sum);
+						System.out.println("nbeleme >>"+nbelem);
 						context.write(key, new PointWritable(nbelem,sum));
 		}
 	}
 
 	
-	public static class KMeansNewReducer extends Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable> {
+	public static class KMeansNewReducer extends Reducer<DoubleWritable, PointWritable, DoubleWritable, PointWritable> {
 		int k =0;
 		double sum = 0.0;
 		int nbelem = 0;
-		protected void setup(Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable>.Context context)
+		protected void setup(Reducer<DoubleWritable, PointWritable, DoubleWritable, PointWritable>.Context context)
 				throws IOException, InterruptedException {
 			
 			
@@ -124,20 +125,25 @@ public class KmeansNew {
 				sum+=pointWritable.Point;
 				nbelem+=pointWritable.nbcluster;
 				
-				context.write(new IntWritable((int)key.get()), pointWritable);
+				context.write(new DoubleWritable(key.get()), pointWritable);
 			}
-			context.getConfiguration().setDouble("newCenters"+key, sum/nbelem);
+			//context.getConfiguration().setDouble("newCenters"+key, sum/nbelem);
 			
-			for(int i=0;i<k ;i++)
-			context.getCounter("newCenters",""+i+"").setValue((long) (sum/nbelem));
-			System.out.println("newCenter is set with the value >>" + sum / nbelem);
+				// il faut envoyer un center pour chaque clé cad chaque cluster 
+			System.out.println("sum >>"+sum);
+			System.out.println("nbeleme >>"+nbelem);
+			for (int i =0; i<k;i++){
+			if( context.getConfiguration().getDouble("Center" + i, 0.0)==key.get())
+				context.getCounter("newCenters",""+i+"" ).setValue((long)(sum/nbelem));
+			}
 		}
 
-		public void cleanup(Reducer<DoubleWritable, PointWritable, IntWritable, PointWritable>.Context context)
+		public void cleanup(Reducer<DoubleWritable, PointWritable, DoubleWritable, PointWritable>.Context context)
 				throws IOException, InterruptedException {
 			
 		
-
+			
+				
 		}
 	}
 
@@ -193,19 +199,18 @@ public class KmeansNew {
 		conf.setInt("NbCluster", Integer.valueOf(args[2]));
 		conf.setInt("NbColonnes", Integer.valueOf(args[3]));
 		Centroids = setCentroids(conf.getInt("NbCluster", 1), conf.get("Centroid"), conf, 0);
-		for (int i = 0; i < Centroids.size(); i++) {
-			conf.setDouble("Center" + i, Centroids.get(i));
-		}
-		System.out.println("Centroids >>" + Centroids);
+		
+		
 
 		boolean converged = false;
 		int nbiteration = 0;
 		List<Double> newCenters = new ArrayList<Double>();
 		while (!converged) {
 			String output = args[1] + "_" + nbiteration + "_" + System.nanoTime();
-			for( int i =0; i<Centroids.size();i++)
-				newCenters.add(conf.getDouble("newCenters"+Centroids.get(i), -1));
-		
+			System.out.println("Centroids >>" + Centroids);
+			for (int i = 0; i < Centroids.size(); i++) {
+				conf.setDouble("Center" + i, Centroids.get(i));
+			}
 			
 			job = Job.getInstance(conf, "Kmeans_iteration" + nbiteration);
 			job.setNumReduceTasks(1);		
@@ -217,24 +222,22 @@ public class KmeansNew {
 			job.setMapOutputValueClass(PointWritable.class);
 			job.setCombinerClass(KmeansNewCombiner.class);
 			job.setReducerClass(KMeansNewReducer.class);
-			job.setOutputKeyClass(IntWritable.class);
+			job.setOutputKeyClass(DoubleWritable.class);
 			job.setOutputValueClass(PointWritable.class);
 			
 			FileInputFormat.addInputPath(job, new Path(args[0]));
 
 			FileOutputFormat.setOutputPath(job, new Path(output));
 			job.waitForCompletion(true);
-			for(int i =0; i<conf.getInt("NbCluster", 1); i++)
-			System.out.println(" here is th counter "+Double.longBitsToDouble(job.getCounters().findCounter("newCenters",""+i+"").getValue()));
+			for(int i =0; i<Centroids.size(); i++)
+			System.out.println(" here is the counter "+Double.longBitsToDouble(job.getCounters().findCounter("newCenters",""+i+"").getValue()));
 			for (int i = 0; i < Centroids.size(); i++) {
 				// here the fucking bug the getCounter doesnt work !!
 				
 				//  essayer de récupérer !! le nouveaux centres !!
-				System.out.println(" using counters "
-						+ Double.longBitsToDouble(job.getCounters().findCounter("newCenters", String.valueOf(Centroids.get(i))).getValue()));
-
+				
 				newCenters
-						.add(Double.longBitsToDouble(job.getCounters().findCounter("newCenters",String.valueOf(Centroids.get(i))).getValue()));
+						.add(Double.longBitsToDouble(job.getCounters().findCounter("newCenters",""+i+"").getValue()));
 				// put new centers in onld centroids list
 				 }
 
@@ -244,25 +247,25 @@ public class KmeansNew {
 			nbiteration++;
 		}
 
-		job = Job.getInstance(conf, "Kmeans");
-
-		job.setNumReduceTasks(1);
-		job.setJarByClass(KmeansNew.class);
-		job.setInputFormatClass(TextInputFormat.class);
-		job.setOutputFormatClass(TextOutputFormat.class);
-		job.setMapperClass(KMeansNewMapper.class);
-		job.setMapOutputKeyClass(DoubleWritable.class);
-		job.setMapOutputValueClass(PointWritable.class);
-		job.setCombinerClass(KmeansNewCombiner.class);
-		job.setReducerClass(KMeansNewReducer.class);
-		job.setOutputKeyClass(IntWritable.class);
-		job.setOutputValueClass(PointWritable.class);
-		
-		FileInputFormat.addInputPath(job, new Path(args[0]));
-
-		FileOutputFormat.setOutputPath(job, new Path(args[1]));
-
-		System.exit(job.waitForCompletion(true) ? 0 : 1);
+//		job = Job.getInstance(conf, "Kmeans");
+//
+//		job.setNumReduceTasks(1);
+//		job.setJarByClass(KmeansNew.class);
+//		job.setInputFormatClass(TextInputFormat.class);
+//		job.setOutputFormatClass(TextOutputFormat.class);
+//		job.setMapperClass(KMeansNewMapper.class);
+//		job.setMapOutputKeyClass(DoubleWritable.class);
+//		job.setMapOutputValueClass(PointWritable.class);
+//		job.setCombinerClass(KmeansNewCombiner.class);
+//		job.setReducerClass(KMeansNewReducer.class);
+//		job.setOutputKeyClass(DoubleWritable.class);
+//		job.setOutputValueClass(PointWritable.class);
+//		
+//		FileInputFormat.addInputPath(job, new Path(args[0]));
+//
+//		FileOutputFormat.setOutputPath(job, new Path(args[1]));
+//
+//		System.exit(job.waitForCompletion(true) ? 0 : 1);
 
 	}
 
